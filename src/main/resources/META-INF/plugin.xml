@@ -1,0 +1,61 @@
+<idea-plugin>
+    <id>com.example.rustsearch</id>
+    <name>RustSearch</name>
+    <vendor>RustSearch-AS</vendor>
+
+    <description><![CDATA[
+        <h3>高性能全局文本搜索引擎</h3>
+        <p>基于 Rust + ripgrep 内核的全局文本搜索,通过 JNI 集成到 IntelliJ Platform。</p>
+        <ul>
+            <li>文件级并行搜索,性能对标 ripgrep</li>
+            <li>支持正则、大小写、全字匹配</li>
+            <li>支持 .gitignore 规则与文件通配符过滤</li>
+            <li>搜索过程可中途取消</li>
+            <li>流式结果返回,边搜索边展示</li>
+        </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <b>1.0.0</b><br/>
+        <ul>
+            <li>性能修复:panic=unwind 改 catch_unwind 保护 JNI、with_local_frame 防 local ref 泄漏、par_bridge 流式搜索、mmap 上下文提取</li>
+            <li>稳定性修复:UI 令牌机制丢弃滞后 EDT 任务、结果树自动展开、navigate 兼容 IC-261 线程模型</li>
+            <li>边界保护:config 范围校验、UI 截断(50000 匹配/5000 文件)</li>
+            <li>Android Studio 2026.1 (AI-261) 兼容:until-build 扩展到 261.*</li>
+        </ul>
+        <b>0.1.0</b><br/>
+        <ul>
+            <li>MVP 版本:独立 Tool Window 搜索</li>
+            <li>支持字面量/正则搜索、大小写、全字匹配</li>
+            <li>支持 include/exclude globs 文件过滤</li>
+            <li>支持搜索中途取消</li>
+            <li>结果树按文件分组,双击跳转</li>
+        </ul>
+    ]]></change-notes>
+
+    <!-- 兼容 Android Studio 2023.1+ (IC-231) 到 Android Studio 2026.1 (AI-261) -->
+    <idea-version since-build="231" until-build="261.*"/>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 搜索工具窗口 -->
+        <toolWindow id="RustSearch"
+                    anchor="left"
+                    icon="AllIcons.Actions.Search"
+                    factoryClass="com.example.rustsearch.ui.RustSearchToolWindowFactory"/>
+
+        <!-- 应用级 Service,管理 native 库加载与搜索会话 -->
+        <applicationService
+            serviceImplementation="com.example.rustsearch.service.RustSearchService"/>
+
+        <!-- 快捷键 Action -->
+        <action id="RustSearch.OpenSearch"
+                class="com.example.rustsearch.action.RustSearchAction"
+                text="%action.rustsearch.open.text"
+                description="%action.rustsearch.open.description">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift alt F"/>
+            <keyboard-shortcut keymap="mac" first-keystroke="meta shift alt F"/>
+        </action>
+    </extensions>
+</idea-plugin>

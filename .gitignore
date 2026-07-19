@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+.intellijPlatform/
+
+# IntelliJ IDEA / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.run/
+
+# Rust / Cargo
+rust-search/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

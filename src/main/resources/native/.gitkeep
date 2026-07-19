@@ -1,0 +1,3 @@
+# 此目录存放 Rust 编译后的动态库(librust_search.dylib / .so / .dll)
+# 由 Gradle copyNativeLib 任务自动填充,请勿手动修改
+# 运行时由 RustSearchService 提取到临时目录并 System.load
