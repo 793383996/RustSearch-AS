@@ -43,7 +43,7 @@ class RustSearchToolWindowFactory : ToolWindowFactory, DumbAware {
             .createContent(panel, RustSearchBundle.message("toolwindow.content.name"), false)
         toolWindow.contentManager.addContent(content)
 
-        // 需求 1:缓存 panel 引用到 Content UserData(231 SDK 中 ToolWindow 接口
+        // 需求 1:缓存 panel 引用到 Content userdata(231 SDK 中 ToolWindow 接口
         // 不继承 UserDataHolder,但 Content 继承 UserDataHolder),供 RustSearchAction 获取
         content.putUserData(PANEL_KEY, panel)
 

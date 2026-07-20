@@ -22,7 +22,11 @@
             <li>macOS Universal Binary:Apple Silicon (M1) 与 Intel Mac 共用一个 dylib</li>
             <li>CI/CD:GitHub Actions 自动化构建,tag 推送即产出三平台 Release</li>
             <li>按平台分发:macOS/Linux/Windows 三个独立 zip,按需下载</li>
-            <li>修复 Keymap 中 Action 文本显示为 %action.rustsearch.open.text 占位符的问题(plugin.xml 补充 resource-bundle 声明)</li>
+            <li>修复 Keymap 中 Action 文本显示为 %action.rustsearch.open.text 占位符的问题(plugin.xml 改为硬编码文本,运行时由 RustSearchAction.update() 动态切换)</li>
+            <li>新增行类型过滤开关:忽略注释 / 忽略 import / 忽略 package(Rust 侧 MatchSink 在匹配阶段过滤,UI 层 JBCheckBox 控制)</li>
+            <li>搜索结果按行类型着色:注释行淡蓝色(亮色 #7F9BD5 / 暗色 #9BC4FF,自动跟随主题),import/package 行灰色,代码行默认色</li>
+            <li>新增 LineKind 枚举与 Rust 侧 line_kind::classify_line(支持 //、#、/*、*、&lt;!--、-- 注释,以及 import、#include、using、require、package 等导入/包声明)</li>
+            <li>开关状态持久化:6 个开关(regex/大小写/全字/忽略注释/忽略import/忽略package)状态通过 PropertiesComponent 保存到项目级配置,IDE 重启后保留</li>
         </ul>
         <b>1.1.0</b><br/>
         <ul>
@@ -56,10 +60,6 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- 注册 i18n resource bundle,让 plugin.xml 中 %action.xxx.text 等
-             占位符能被 IntelliJ Platform 解析为本地化文本(否则 Keymap 显示原始 key) -->
-        <resource-bundle>com.example.rustsearch.messages</resource-bundle>
-
         <!-- 搜索工具窗口 -->
         <toolWindow id="RustSearch"
                     anchor="left"
@@ -74,11 +74,16 @@
     <!-- 快捷键 Action 必须放在独立的 <actions> 节点,
          不能放在 <extensions> 内(否则 Action 不会注册,actionPerformed 不会被调用) -->
     <!-- 默认快捷键 Shift+Alt+F(Mac/Windows/Linux 统一),用户可在 AS Keymap 中搜索 "RustSearch" 修改 -->
+    <!-- 注:text/description 不使用 %xxx% 占位符 — IntelliJ Platform 对 plugin.xml 占位符解析
+         与运行时 DynamicBundle 加载是两套独立路径,部分 IDE 版本(如 AS 2026.1/AI-261)
+         不会解析 <resource-bundle> 声明的 bundle 用于 plugin.xml 占位符。
+         这里硬编码默认文本,RustSearchAction.update() 在运行时通过 RustSearchBundle.message()
+         动态切换为本地化文本(有选中显示"搜索选中文字",无选中显示"全局文本搜索") -->
     <actions>
         <action id="RustSearch.OpenSearch"
                 class="com.example.rustsearch.action.RustSearchAction"
-                text="%action.rustsearch.open.text"
-                description="%action.rustsearch.open.description">
+                text="RustSearch"
+                description="Open RustSearch tool window">
             <keyboard-shortcut keymap="$default" first-keystroke="shift alt F"/>
         </action>
     </actions>

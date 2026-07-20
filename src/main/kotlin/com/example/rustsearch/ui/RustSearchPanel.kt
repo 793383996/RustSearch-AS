@@ -14,11 +14,13 @@ import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
+import com.intellij.ide.util.PropertiesComponent
 import kotlinx.coroutines.*
 import java.awt.BorderLayout
 import java.awt.Dimension
@@ -162,6 +164,77 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         JBCheckBox(".$ext").apply { toolTipText = RustSearchBundle.message("search.extension.checkbox.tooltip", ext) }
     }
 
+    // ==================== 行类型过滤(v1.2.0 新增) ====================
+
+    /**
+     * 忽略注释行开关
+     *
+     * 勾选后,Rust 侧 MatchSink::matched 在匹配阶段过滤掉所有注释行
+     * (//、#、&#47;*、*、&lt;!--、--),不在搜索结果中显示。
+     *
+     * 默认不勾选。勾选状态通过 [PropertiesComponent] 持久化到项目级配置。
+     */
+    private val ignoreCommentsCheckBox = JBCheckBox(RustSearchBundle.message("search.line.filter.comments")).apply {
+        toolTipText = RustSearchBundle.message("search.line.filter.comments.tooltip")
+    }
+
+    /**
+     * 忽略 import 行开关
+     *
+     * 勾选后,Rust 侧 MatchSink::matched 在匹配阶段过滤掉所有 import 行
+     * (import、#include、using、require 等),不在搜索结果中显示。
+     *
+     * 默认不勾选。勾选状态通过 [PropertiesComponent] 持久化到项目级配置。
+     */
+    private val ignoreImportsCheckBox = JBCheckBox(RustSearchBundle.message("search.line.filter.imports")).apply {
+        toolTipText = RustSearchBundle.message("search.line.filter.imports.tooltip")
+    }
+
+    /**
+     * 忽略 package 行开关
+     *
+     * 勾选后,Rust 侧 MatchSink::matched 在匹配阶段过滤掉所有 package 声明行
+     * (package xxx),不在搜索结果中显示。
+     *
+     * 默认不勾选。勾选状态通过 [PropertiesComponent] 持久化到项目级配置。
+     */
+    private val ignorePackagesCheckBox = JBCheckBox(RustSearchBundle.message("search.line.filter.packages")).apply {
+        toolTipText = RustSearchBundle.message("search.line.filter.packages.tooltip")
+    }
+
+    // ==================== 开关状态持久化(v1.2.0) ====================
+    //
+    // 重要:这两个字段必须在 init 块之前声明!
+    // Kotlin 类成员按声明顺序初始化,init 块中调用 loadSwitchStates() 会读取 switchKeys,
+    // 若 switchKeys 声明在 init 块之后,执行 init 块时 switchKeys 仍为 null,抛出 NPE,
+    // 导致 ToolWindowFactory.createToolWindowContent 失败,ToolWindow 无 Content,
+    // 用户看到"没有要显示的内容"。
+
+    /**
+     * 持久化 key 前缀(项目级配置,避免跨项目污染)
+     *
+     * 使用 [PropertiesComponent.getInstance(Project)] 而非 application 级,
+     * 让不同项目可以有不同的开关组合。
+     */
+    private val switchStateKeyPrefix = "rustsearch.switch."
+
+    /**
+     * 6 个开关的 key 列表,集中管理避免拼写错误
+     *
+     * 必须在所有开关组件(regexButton/caseSensitiveButton/wholeWordsButton/
+     * ignoreCommentsCheckBox/ignoreImportsCheckBox/ignorePackagesCheckBox)声明之后,
+     * 这里通过 Pair 形式把 key 与对应组件绑定,供 [loadSwitchStates] /
+     * [saveSwitchStates] 统一遍历。
+     */
+    private val switchKeys = listOf(
+        "regex" to regexButton,
+        "caseSensitive" to caseSensitiveButton,
+        "wholeWords" to wholeWordsButton,
+        "skipComments" to ignoreCommentsCheckBox,
+        "skipImports" to ignoreImportsCheckBox,
+        "skipPackages" to ignorePackagesCheckBox
+    )
+
     /** 结果树 */
     private val resultTree = JTree(treeModel).apply {
         isRootVisible = false
@@ -179,6 +252,11 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
     init {
         setupUI()
         setupListeners()
+        // v1.2.0:从 PropertiesComponent 加载 6 个开关的持久化状态
+        // 必须在 setupUI + setupListeners 之后,确保组件已创建,
+        // setSelected 触发的 ActionListener 不会引发 autoSearch(isRefreshingModules 不适用,
+        // 但 performSearch 在 pattern 为空时会静默返回,不会误触发搜索)
+        loadSwitchStates()
     }
 
     /**
@@ -224,11 +302,29 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
             extensionCheckBoxes.forEach { add(it) }
         }
 
+        // 第四行(v1.2.0):行类型过滤(忽略注释 / import / package)
+        // 与 row3 同样用 FlowLayout,保持视觉一致
+        val row4 = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
+            add(JBLabel(RustSearchBundle.message("search.line.filter.label")))
+            // 提示:勾选=在搜索结果中过滤掉对应行类型
+            add(JBLabel(RustSearchBundle.message("search.line.filter.hint")).apply {
+                font = font.deriveFont(font.size2D - 1f)
+                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+            })
+            add(ignoreCommentsCheckBox)
+            add(Box.createHorizontalStrut(4))
+            add(ignoreImportsCheckBox)
+            add(Box.createHorizontalStrut(4))
+            add(ignorePackagesCheckBox)
+        }
+
         topPanel.add(row1)
         topPanel.add(Box.createVerticalStrut(4))
         topPanel.add(row2)
         topPanel.add(Box.createVerticalStrut(2))
         topPanel.add(row3)
+        topPanel.add(Box.createVerticalStrut(2))
+        topPanel.add(row4)
 
         // 中间结果树
         val treeScroll = JScrollPane(resultTree)
@@ -268,13 +364,22 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
 
         // 筛选条件变化自动触发搜索(ActionListener 需接受 ActionEvent 参数)
         // P1-3:模块列表刷新期间(isRefreshingModules=true)跳过,避免 addItem 触发事件风暴
+        // v1.2.0:autoSearchListener 同时持久化 6 个开关状态(PropertiesComponent),
+        // 让 regex/caseSensitive/wholeWords/skipComments/skipImports/skipPackages 在 IDE 重启后保留
         val autoSearchListener = java.awt.event.ActionListener {
-            if (!isRefreshingModules) performSearch()
+            if (!isRefreshingModules) {
+                saveSwitchStates()
+                performSearch()
+            }
         }
         regexButton.addActionListener(autoSearchListener)
         caseSensitiveButton.addActionListener(autoSearchListener)
         wholeWordsButton.addActionListener(autoSearchListener)
         extensionCheckBoxes.forEach { it.addActionListener(autoSearchListener) }
+        // v1.2.0:行类型过滤开关同样自动触发搜索 + 持久化
+        ignoreCommentsCheckBox.addActionListener(autoSearchListener)
+        ignoreImportsCheckBox.addActionListener(autoSearchListener)
+        ignorePackagesCheckBox.addActionListener(autoSearchListener)
 
         // 作用域切换:启用/禁用模块下拉框并自动搜索
         scopeProjectRadio.addActionListener { _ ->
@@ -397,7 +502,11 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
             wholeWords = wholeWordsButton.isSelected,
             includeGlobs = includeGlobs,
             excludeGlobs = emptyList(),
-            contextLines = 2
+            contextLines = 2,
+            // v1.2.0:行类型过滤开关(由 Rust 侧 MatchSink::matched 在匹配阶段过滤)
+            skipComments = ignoreCommentsCheckBox.isSelected,
+            skipImports = ignoreImportsCheckBox.isSelected,
+            skipPackages = ignorePackagesCheckBox.isSelected
         )
 
         // 清空旧结果
@@ -455,14 +564,20 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
                     val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
                     statusLabel.text = RustSearchBundle.message("search.status.complete", treeModel.getTotalMatches(), treeModel.getFileCount(), elapsed)
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // v1.2.0 关键修复:捕获 Throwable 而非 Exception
+                // 原因:JNI 调用可能抛出 NoSuchMethodError / UnsatisfiedLinkError 等 java.lang.Error 子类,
+                // 这些不被 catch (e: Exception) 捕获,会逃逸到 CoroutineExceptionHandler,
+                // 导致 statusLabel 卡死在 "搜索中" 文本,UI 无法恢复。
+                // 改为 catch Throwable 后,所有异常(Error + Exception)统一处理,更新 UI 为错误状态。
                 logger.error("搜索出错: pattern='$pattern', roots=$roots", e)
                 ApplicationManager.getApplication().invokeLater {
                     if (currentToken != activeSearchToken) return@invokeLater
-                    statusLabel.text = RustSearchBundle.message("search.status.error", e.message ?: "")
+                    statusLabel.text = RustSearchBundle.message("search.status.error", e.message ?: e.javaClass.simpleName)
                 }
             } finally {
-                // 搜索结束,无需切换按钮状态(已移除搜索/取消按钮)
+                // v1.2.0:保底状态清理(防御性,正常流程不会走到这里的清理逻辑)
+                // 当前 statusLabel 已在 catch 或 complete 分支更新,这里仅作为兜底
             }
         }
     }
@@ -544,6 +659,50 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
             }
         } else {
             statusLabel.text = RustSearchBundle.message("search.status.file.not.found", data.filePath)
+        }
+    }
+
+    // ==================== 开关状态持久化(v1.2.0) ====================
+    //
+    // 字段(switchStateKeyPrefix/switchKeys)声明在 init 块之前,见类顶部注释说明。
+    //
+    // loadSwitchStates / saveSwitchStates 的实现如下,供 init 块与 autoSearchListener 调用。
+
+    /**
+     * 从 [PropertiesComponent] 加载 6 个开关状态到 UI 组件
+     *
+     * 在 init 块最后调用(此时 setupUI 已完成组件创建,setupListeners 已注册监听)。
+     * 加载顺序无关紧要(各开关独立),setSelected 触发的 ActionListener 不会引发搜索
+     * —— 因为 loadSwitchStates 在 init 阶段调用,此时用户尚未输入搜索词,
+     * performSearch 会因 pattern 为空而静默返回。
+     *
+     * 默认值统一为 false(未勾选),与 SearchConfig 字段默认值一致。
+     */
+    private fun loadSwitchStates() {
+        val props = PropertiesComponent.getInstance(project)
+        for ((suffix, button) in switchKeys) {
+            // getBoolean(key, default):key 不存在时返回 default,首次启动状态为 false
+            button.isSelected = props.getBoolean(switchStateKeyPrefix + suffix, false)
+        }
+        logger.info("Switch states loaded: regex=${regexButton.isSelected}, " +
+                "caseSensitive=${caseSensitiveButton.isSelected}, " +
+                "wholeWords=${wholeWordsButton.isSelected}, " +
+                "skipComments=${ignoreCommentsCheckBox.isSelected}, " +
+                "skipImports=${ignoreImportsCheckBox.isSelected}, " +
+                "skipPackages=${ignorePackagesCheckBox.isSelected}")
+    }
+
+    /**
+     * 把 6 个开关的当前状态写入 [PropertiesComponent]
+     *
+     * 在 autoSearchListener 中调用,与 performSearch 同步执行。
+     * PropertiesComponent 是轻量键值存储(Boolean 以 String 形式持久化),
+     * 单次写入开销可忽略(<1ms)。
+     */
+    private fun saveSwitchStates() {
+        val props = PropertiesComponent.getInstance(project)
+        for ((suffix, button) in switchKeys) {
+            props.setValue(switchStateKeyPrefix + suffix, button.isSelected)
         }
     }
 

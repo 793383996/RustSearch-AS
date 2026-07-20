@@ -1,5 +1,6 @@
 package com.example.rustsearch.ui
 
+import com.example.rustsearch.LineKind
 import com.example.rustsearch.RustSearchBundle
 import com.example.rustsearch.RustSearchEngine.SearchResult
 import com.intellij.icons.AllIcons
@@ -8,6 +9,7 @@ import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.ui.UIUtil
+import java.awt.Color
 import java.awt.Component
 import javax.swing.Icon
 import javax.swing.JLabel
@@ -131,7 +133,8 @@ class SearchResultTreeModel : DefaultTreeModel(DefaultMutableTreeNode("root")) {
                     column = result.column,
                     matchedText = result.matchedText,
                     contextBefore = result.contextBefore,
-                    contextAfter = result.contextAfter
+                    contextAfter = result.contextAfter,
+                    lineKind = result.lineKind
                 ),
                 true // allowsChildren = false,叶子节点
             )
@@ -241,6 +244,14 @@ data class FileNodeData(
 
 /**
  * 匹配节点数据
+ *
+ * v1.2.0:新增 [lineKind] 字段,用于 UI 层按行类型着色显示:
+ * - COMMENT → 淡蓝色
+ * - IMPORT / PACKAGE → 灰色
+ * - CODE → 默认色
+ *
+ * equals/hashCode 不参与 lineKind(同 file+line+column 即视为同一节点),
+ * 避免 UI 增量更新时重复节点判定被 lineKind 干扰。
  */
 data class MatchNodeData(
     val filePath: String,
@@ -248,7 +259,8 @@ data class MatchNodeData(
     val column: Int,
     val matchedText: String,
     val contextBefore: Array<String>,
-    val contextAfter: Array<String>
+    val contextAfter: Array<String>,
+    val lineKind: LineKind = LineKind.CODE
 ) {
     override fun toString(): String {
         return RustSearchBundle.message("tree.match.node.display", lineNumber, matchedText)
@@ -324,31 +336,48 @@ class SearchResultTreeCellRenderer(
      *
      * 需求 2(用户反馈):右侧文件名已移除,因为匹配节点已在对应文件节点下,
      * 文件名重复显示冗余。仅保留行号 + 代码行 + 关键字高亮。
+     *
+     * v1.2.0:按 [MatchNodeData.lineKind] 着色:
+     * - COMMENT → 淡蓝色(亮色 0x7F9BD5 / 暗色 0x9BC4FF,自动跟随主题)
+     * - IMPORT / PACKAGE → 灰色(GRAYED_ATTRIBUTES)
+     * - CODE → 默认色(REGULAR_ATTRIBUTES)
      */
     private fun renderMatchNode(data: MatchNodeData) {
         // 左:行号(5 位宽度,灰色)
         append(String.format("%5d: ", data.lineNumber), SimpleTextAttributes.GRAYED_ATTRIBUTES)
 
-        // 中:代码行(关键字高亮)
+        // 中:代码行(按行类型选择基础色 + 关键字高亮)
+        val baseAttr = when (data.lineKind) {
+            LineKind.COMMENT -> COMMENT_ATTR
+            LineKind.IMPORT, LineKind.PACKAGE -> SimpleTextAttributes.GRAYED_ATTRIBUTES
+            LineKind.CODE -> SimpleTextAttributes.REGULAR_ATTRIBUTES
+        }
         val pattern = patternProvider()
         if (pattern.isNotEmpty()) {
-            appendWithHighlight(data.matchedText, pattern)
+            appendWithHighlight(data.matchedText, pattern, baseAttr)
         } else {
-            append(data.matchedText, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+            append(data.matchedText, baseAttr)
         }
     }
 
     /**
      * 关键字高亮:在 text 中查找 pattern 的所有出现(忽略大小写),
-     * 匹配区间用 STYLE_SEARCH_MATCH(黄色背景)高亮,非匹配区间用 REGULAR_ATTRIBUTES。
+     * 匹配区间用 STYLE_SEARCH_MATCH(黄色背景)高亮,非匹配区间用 [baseAttr]。
+     *
+     * v1.2.0:baseAttr 参数化,支持按行类型着色(Comment 淡蓝、Import/Package 灰)。
+     * matchAttr 基于 baseAttr.fgColor 构造,保证高亮段的前景色与基础色一致,
+     * 仅追加黄色背景。
      *
      * 仅做字面量查找;正则模式由调用方传空 pattern 跳过高亮。
      *
      * 注:231 SDK 的 SimpleTextAttributes 4 参数构造函数签名为
      * `(fgColor, bgColor, waveColor, style)`,无 5 参数版本,无 fontType 字段。
      */
-    private fun appendWithHighlight(text: String, pattern: String) {
-        val baseAttr = SimpleTextAttributes.REGULAR_ATTRIBUTES
+    private fun appendWithHighlight(
+        text: String,
+        pattern: String,
+        baseAttr: SimpleTextAttributes
+    ) {
         val matchAttr = SimpleTextAttributes(
             baseAttr.fgColor,
             JBColor.YELLOW,
@@ -373,5 +402,22 @@ class SearchResultTreeCellRenderer(
             append(text.substring(idx, idx + pattern.length), matchAttr)
             start = idx + pattern.length
         }
+    }
+
+    companion object {
+        /**
+         * 注释行淡蓝色(v1.2.0)
+         *
+         * - 亮色主题:RGB(127, 155, 213) = 0x7F9BD5
+         * - 暗色主题:RGB(155, 196, 255) = 0x9BC4FF
+         *
+         * 由 JBColor 自动跟随主题切换;STYLE_PLAIN 与默认正文样式一致。
+         */
+        private val COMMENT_ATTR: SimpleTextAttributes = SimpleTextAttributes(
+            JBColor(Color(0x7F, 0x9B, 0xD5), Color(0x9B, 0xC4, 0xFF)),
+            null,
+            null,
+            SimpleTextAttributes.STYLE_PLAIN
+        )
     }
 }
