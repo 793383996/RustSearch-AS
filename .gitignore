@@ -11,6 +11,12 @@ build/
 out/
 .run/
 
+# Kotlin 编译会话缓存(./gradlew 编译产物)
+.kotlin/
+
+# 本地 SDK 路径配置(每台机器不同,不入库)
+local.properties
+
 # Rust / Cargo
 rust-search/target/
 
@@ -20,3 +26,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# TRAE AI 助手计划文档(本地工作产物,不入库)
+.trae/
