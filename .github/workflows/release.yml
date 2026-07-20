@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-platform-zip:
+    name: Build ${{ matrix.os-name }} zip
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            os-name: macos
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            artifact-name: RustSearch-AS-${{ github.ref_name }}-macos.zip
+          - os: ubuntu-latest
+            os-name: linux
+            rust-targets: 'x86_64-unknown-linux-gnu'
+            artifact-name: RustSearch-AS-${{ github.ref_name }}-linux.zip
+          - os: windows-latest
+            os-name: windows
+            rust-targets: 'x86_64-pc-windows-msvc'
+            artifact-name: RustSearch-AS-${{ github.ref_name }}-windows.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-search/target
+          key: ${{ runner.os }}-${{ matrix.os-name }}-cargo-${{ hashFiles('rust-search/Cargo.lock') }}
+
+      # macOS:构建双架构并用 lipo 合并为 universal binary
+      - name: Build macOS universal binary
+        if: matrix.os-name == 'macos'
+        working-directory: rust-search
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          lipo -create \
+            target/aarch64-apple-darwin/release/librust_search.dylib \
+            target/x86_64-apple-darwin/release/librust_search.dylib \
+            -output target/release/librust_search.dylib
+          mkdir -p ../src/main/resources/native
+          cp target/release/librust_search.dylib ../src/main/resources/native/
+
+      # Linux:直接构建 x86_64
+      - name: Build Linux native lib
+        if: matrix.os-name == 'linux'
+        working-directory: rust-search
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
+          mkdir -p ../src/main/resources/native
+          cp target/x86_64-unknown-linux-gnu/release/librust_search.so ../src/main/resources/native/
+
+      # Windows:直接构建 x86_64
+      - name: Build Windows native lib
+        if: matrix.os-name == 'windows'
+        working-directory: rust-search
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          mkdir -p ../src/main/resources/native
+          cp target/x86_64-pc-windows-msvc/release/rust_search.dll ../src/main/resources/native/
+
+      - name: Build plugin zip
+        run: ./gradlew buildPlugin --no-daemon -x buildRust
+
+      - name: Rename zip with platform
+        shell: bash
+        run: |
+          mv build/distributions/RustSearch-AS-*.zip "${{ matrix.artifact-name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os-name }}-zip
+          path: ${{ matrix.artifact-name }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-platform-zip
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create Release with all zips
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RustSearch ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/*.zip

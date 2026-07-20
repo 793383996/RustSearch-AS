@@ -112,14 +112,38 @@ val nativeLibName: String by lazy {
 
 /**
  * 编译 Rust 动态库(release 模式)
+ *
+ * v1.2.0:macOS 构建为 Universal Binary(aarch64 + x86_64 + lipo 合并),
+ *         M1 与 Intel Mac 共用一个 dylib。
+ *         Linux/Windows 直接构建 host 架构。
+ *
+ * 本地 macOS 开发者需先:
+ *   rustup target add aarch64-apple-darwin x86_64-apple-darwin
+ *
  * 输入增量检测:仅在 rust-search/src 或 Cargo.toml 变更时重新编译
  */
 val buildRust by tasks.registering(Exec::class) {
     group = "rust"
-    description = "编译 Rust 动态库(cargo build --release)"
+    description = "编译 Rust 动态库(macOS 产出 Universal Binary,Linux/Windows 产出 host 架构)"
 
     workingDir = rustDir
-    commandLine("cargo", "build", "--release")
+    val osName = System.getProperty("os.name").lowercase()
+    if (osName.contains("mac") || osName.contains("darwin")) {
+        // macOS:构建 universal binary(aarch64 + x86_64 + lipo 合并)
+        // 一条 shell 命令链式执行,确保双架构都构建成功后再 lipo
+        commandLine("sh", "-c", """
+            cargo build --release --target aarch64-apple-darwin &&
+            cargo build --release --target x86_64-apple-darwin &&
+            mkdir -p target/release &&
+            lipo -create \
+                target/aarch64-apple-darwin/release/librust_search.dylib \
+                target/x86_64-apple-darwin/release/librust_search.dylib \
+                -output target/release/librust_search.dylib
+        """.trimIndent())
+    } else {
+        // Linux/Windows:直接构建 host 架构
+        commandLine("cargo", "build", "--release")
+    }
 
     // 增量编译:仅在源码或配置变更时重建
     inputs.dir(rustDir.resolve("src"))

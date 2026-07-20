@@ -20,6 +20,11 @@ local.properties
 # Rust / Cargo
 rust-search/target/
 
+# Native libraries (CI 产出,不入库,避免 binary 污染 git 历史)
+src/main/resources/native/*.dylib
+src/main/resources/native/*.so
+src/main/resources/native/*.dll
+
 # OS
 .DS_Store
 Thumbs.db

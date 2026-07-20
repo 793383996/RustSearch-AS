@@ -54,7 +54,10 @@ RustSearch is a global text search plugin for Android Studio / IntelliJ IDEA. Th
 
 ### Option 1: Download from Release (Recommended)
 
-1. Go to [Releases](https://github.com/793383996/RustSearch-AS/releases) and download the latest `RustSearch-AS-x.x.x.zip`
+1. Go to [Releases](https://github.com/793383996/RustSearch-AS/releases) and download the platform-specific zip:
+   - macOS: `RustSearch-AS-x.x.x-macos.zip` (Universal Binary, works on both M1 and Intel)
+   - Linux: `RustSearch-AS-x.x.x-linux.zip`
+   - Windows: `RustSearch-AS-x.x.x-windows.zip`
 2. Open Android Studio → `Preferences` → `Plugins` → ⚙️ gear → `Install Plugin from Disk...`
 3. Select the downloaded zip file and restart Android Studio
 
@@ -227,11 +230,13 @@ RustSearch requires building native libraries for each target platform:
 
 | Platform | Library File | Build Command |
 |----------|--------------|---------------|
-| macOS | `librust_search.dylib` | `cargo build --release` |
-| Linux | `librust_search.so` | `cargo build --release` |
-| Windows | `rust_search.dll` | `cargo build --release` |
+| macOS (Universal) | `librust_search.dylib` | `cargo build --release --target aarch64-apple-darwin && cargo build --release --target x86_64-apple-darwin && lipo -create ...` |
+| Linux | `librust_search.so` | `cargo build --release --target x86_64-unknown-linux-gnu` |
+| Windows | `rust_search.dll` | `cargo build --release --target x86_64-pc-windows-msvc` |
 
-Native libraries are placed under `src/main/resources/native/<platform>/` and loaded by `RustSearchService` at startup based on platform.
+Native libraries are placed under `src/main/resources/native/` (not committed, produced by CI or local `buildRust` task), and loaded by `RustSearchService` at startup based on `os.name`. macOS Universal Binary is transparent to Kotlin — M1 and Intel share the same dylib.
+
+CI/CD: Pushing to `main` or PRs automatically runs Rust tests + Kotlin compile verification; pushing a `v*.*.*` tag automatically builds three-platform zips and publishes them to Release.
 
 ### Testing
 
@@ -255,7 +260,15 @@ Enable diagnostic logs: Open `idea.log` and filter by `RustSearch` keyword to vi
 
 ## Version History
 
-### v1.1.0 (In Development)
+### v1.2.0
+
+- Cross-platform support: Added Linux (.so) and Windows (.dll) native libraries
+- macOS Universal Binary: Apple Silicon (M1) and Intel Mac share a single dylib
+- CI/CD: GitHub Actions automated build, tag push produces three-platform Release
+- Per-platform distribution: macOS/Linux/Windows three separate zips, download on demand
+- Fixed Keymap showing `%action.rustsearch.open.text` placeholder instead of localized text (added `<resource-bundle>` declaration in plugin.xml)
+
+### v1.1.0
 
 - Shortcut unified to `Shift+Alt+F` (Mac/Windows/Linux), configurable in Keymap
 - Selected text → shortcut auto-prefill and search
