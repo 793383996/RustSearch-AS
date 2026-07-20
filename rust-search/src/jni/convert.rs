@@ -82,6 +82,9 @@ pub fn build_config_from_jni(
     include_globs_arr: &JObjectArray,
     exclude_globs_arr: &JObjectArray,
     context_lines: jint,
+    skip_comments: jboolean,
+    skip_imports: jboolean,
+    skip_packages: jboolean,
 ) -> Result<crate::SearchConfig, SearchError> {
     let roots_strs = jstring_array_to_vec(env, roots_arr)?;
     let pattern_str = jstring_to_rust(env, pattern)?;
@@ -97,6 +100,9 @@ pub fn build_config_from_jni(
     config.include_globs = include_globs;
     config.exclude_globs = exclude_globs;
     config.context_lines = jint_to_usize(context_lines);
+    config.skip_comments = jboolean_to_bool(skip_comments);
+    config.skip_imports = jboolean_to_bool(skip_imports);
+    config.skip_packages = jboolean_to_bool(skip_packages);
 
     config.validate()?;
     Ok(config)

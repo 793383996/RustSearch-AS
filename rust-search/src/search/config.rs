@@ -47,6 +47,15 @@ pub struct SearchConfig {
 
     /// 是否搜索隐藏文件(默认 false)
     pub search_hidden: bool,
+
+    /// v1.2.0:跳过注释行(//、#、/*、*、<!--、--),不返回匹配结果
+    pub skip_comments: bool,
+
+    /// v1.2.0:跳过 import 行(import、#include、include、require、using、from),不返回匹配结果
+    pub skip_imports: bool,
+
+    /// v1.2.0:跳过 package 行(Java/Kotlin/Go 的 package 声明),不返回匹配结果
+    pub skip_packages: bool,
 }
 
 impl SearchConfig {
@@ -64,6 +73,9 @@ impl SearchConfig {
             max_matches_per_file: 10_000,
             max_total_matches: 100_000,
             search_hidden: false,
+            skip_comments: false,
+            skip_imports: false,
+            skip_packages: false,
         }
     }
 
@@ -146,6 +158,9 @@ pub struct SearchConfigBuilder {
     max_matches_per_file: Option<usize>,
     max_total_matches: Option<usize>,
     search_hidden: bool,
+    skip_comments: bool,
+    skip_imports: bool,
+    skip_packages: bool,
 }
 
 impl SearchConfigBuilder {
@@ -208,6 +223,21 @@ impl SearchConfigBuilder {
         self
     }
 
+    pub fn skip_comments(mut self, skip: bool) -> Self {
+        self.skip_comments = skip;
+        self
+    }
+
+    pub fn skip_imports(mut self, skip: bool) -> Self {
+        self.skip_imports = skip;
+        self
+    }
+
+    pub fn skip_packages(mut self, skip: bool) -> Self {
+        self.skip_packages = skip;
+        self
+    }
+
     pub fn build(self) -> SearchResult<SearchConfig> {
         let max_per_file = self.max_matches_per_file.unwrap_or(10_000);
         let max_total = self.max_total_matches.unwrap_or(100_000);
@@ -224,6 +254,9 @@ impl SearchConfigBuilder {
             max_matches_per_file: max_per_file,
             max_total_matches: max_total,
             search_hidden: self.search_hidden,
+            skip_comments: self.skip_comments,
+            skip_imports: self.skip_imports,
+            skip_packages: self.skip_packages,
         };
         config.validate()?;
         Ok(config)

@@ -85,6 +85,9 @@ pub extern "system" fn Java_com_example_rustsearch_RustSearchEngine_search<'loca
     include_globs: JObjectArray<'local>,
     exclude_globs: JObjectArray<'local>,
     context_lines: jint,
+    skip_comments: jboolean,
+    skip_imports: jboolean,
+    skip_packages: jboolean,
 ) -> jobjectArray {
     let result = catch_unwind(AssertUnwindSafe(|| {
         run_search(
@@ -97,6 +100,9 @@ pub extern "system" fn Java_com_example_rustsearch_RustSearchEngine_search<'loca
             &include_globs,
             &exclude_globs,
             context_lines,
+            skip_comments,
+            skip_imports,
+            skip_packages,
         )
     }));
 
@@ -117,6 +123,7 @@ pub extern "system" fn Java_com_example_rustsearch_RustSearchEngine_search<'loca
 }
 
 /// 旧同步搜索主流程:参数转换 → 创建引擎 → 执行搜索 → 构建结果
+#[allow(deprecated)]
 fn run_search<'local>(
     env: &mut JNIEnv<'local>,
     roots: &JObjectArray,
@@ -127,6 +134,9 @@ fn run_search<'local>(
     include_globs: &JObjectArray,
     exclude_globs: &JObjectArray,
     context_lines: jint,
+    skip_comments: jboolean,
+    skip_imports: jboolean,
+    skip_packages: jboolean,
 ) -> Result<JObjectArray<'local>, SearchError> {
     let config = convert::build_config_from_jni(
         env,
@@ -138,6 +148,9 @@ fn run_search<'local>(
         include_globs,
         exclude_globs,
         context_lines,
+        skip_comments,
+        skip_imports,
+        skip_packages,
     )?;
 
     let engine = SearchEngine::new(config);
@@ -189,6 +202,9 @@ pub extern "system" fn Java_com_example_rustsearch_RustSearchEngine_startSearch<
     include_globs: JObjectArray<'local>,
     exclude_globs: JObjectArray<'local>,
     context_lines: jint,
+    skip_comments: jboolean,
+    skip_imports: jboolean,
+    skip_packages: jboolean,
 ) -> jlong {
     let result = catch_unwind(AssertUnwindSafe(|| {
         run_start_search(
@@ -201,6 +217,9 @@ pub extern "system" fn Java_com_example_rustsearch_RustSearchEngine_startSearch<
             &include_globs,
             &exclude_globs,
             context_lines,
+            skip_comments,
+            skip_imports,
+            skip_packages,
         )
     }));
 
@@ -364,6 +383,9 @@ fn run_start_search<'local>(
     include_globs: &JObjectArray,
     exclude_globs: &JObjectArray,
     context_lines: jint,
+    skip_comments: jboolean,
+    skip_imports: jboolean,
+    skip_packages: jboolean,
 ) -> Result<u64, SearchError> {
     let config = convert::build_config_from_jni(
         env,
@@ -375,6 +397,9 @@ fn run_start_search<'local>(
         include_globs,
         exclude_globs,
         context_lines,
+        skip_comments,
+        skip_imports,
+        skip_packages,
     )?;
 
     let engine = SearchEngine::new(config);

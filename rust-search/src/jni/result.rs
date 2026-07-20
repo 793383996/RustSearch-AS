@@ -13,6 +13,7 @@ use jni::JNIEnv;
 use crate::error::SearchError;
 use crate::search::SearchMatch;
 use crate::jni::convert::rust_to_jstring;
+use crate::search::line_kind::LineKind;
 
 /// SearchResult 类的全限定名(内部类用 $ 分隔)
 const RESULT_CLASS: &str = "com/example/rustsearch/RustSearchEngine$SearchResult";
@@ -60,6 +61,9 @@ pub fn build_search_result_array<'local>(
 ///
 /// frame 退出时所有中间 local ref 自动释放,无需手动 auto_local。
 /// 返回 SearchError,jni::errors::Error 通过 From 自动转换。
+///
+/// v1.2.0:SearchResult 构造函数增加 `lineKind: Int` 参数(放最后,向后兼容),
+/// 序数值与 Kotlin `LineKind` 枚举对齐(0=Code, 1=Comment, 2=Import, 3=Package)。
 fn build_single_result_in_frame<'a>(
     env: &mut JNIEnv<'a>,
     m: &SearchMatch,
@@ -71,11 +75,19 @@ fn build_single_result_in_frame<'a>(
     let jbefore = build_string_array(env, &m.context_before)?;
     let jafter = build_string_array(env, &m.context_after)?;
 
-    // SearchResult 构造函数签名:
-    // (String path, int line, int column, String matched, String[] before, String[] after)
+    // v1.2.0:行类型序数(Int 传递,Kotlin 侧 LineKind.fromOrdinal 转换)
+    let line_kind_ordinal: i32 = match m.line_kind {
+        LineKind::Code => 0,
+        LineKind::Comment => 1,
+        LineKind::Import => 2,
+        LineKind::Package => 3,
+    };
+
+    // SearchResult 构造函数签名(v1.2.0 新增 lineKind: Int 参数):
+    // (String path, int line, int column, String matched, String[] before, String[] after, int lineKind)
     let obj = env.new_object(
         &class,
-        "(Ljava/lang/String;IILjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V",
+        "(Ljava/lang/String;IILjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;I)V",
         &[
             JValue::Object(&jpath),
             JValue::Int(m.line_number as i32),
@@ -83,6 +95,7 @@ fn build_single_result_in_frame<'a>(
             JValue::Object(&jmatched),
             JValue::Object(&jbefore),
             JValue::Object(&jafter),
+            JValue::Int(line_kind_ordinal),
         ],
     )?;
     Ok(obj)

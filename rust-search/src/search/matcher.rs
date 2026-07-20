@@ -16,6 +16,7 @@ use grep_searcher::{Searcher, Sink, SinkMatch};
 use crate::error::{SearchError, SearchResult};
 use crate::search::config::SearchConfig;
 use crate::search::context::ContextExtractor;
+use crate::search::line_kind::{classify_line, LineKind};
 
 /// 单条匹配结果
 #[derive(Debug, Clone)]
@@ -32,6 +33,8 @@ pub struct SearchMatch {
     pub context_before: Vec<String>,
     /// 上下文行(后 N 行)
     pub context_after: Vec<String>,
+    /// v1.2.0:行类型(Code/Comment/Import/Package),供 Kotlin 侧着色
+    pub line_kind: LineKind,
 }
 
 /// 文本匹配器,封装 grep-regex 的 RegexMatcher 与 grep-searcher 的 Searcher
@@ -39,6 +42,12 @@ pub struct Matcher {
     regex_matcher: RegexMatcher,
     context_lines: usize,
     max_matches_per_file: usize,
+    /// v1.2.0:跳过注释行
+    skip_comments: bool,
+    /// v1.2.0:跳过 import 行
+    skip_imports: bool,
+    /// v1.2.0:跳过 package 行
+    skip_packages: bool,
 }
 
 impl Matcher {
@@ -52,6 +61,9 @@ impl Matcher {
             regex_matcher,
             context_lines: config.context_lines,
             max_matches_per_file: config.max_matches_per_file,
+            skip_comments: config.skip_comments,
+            skip_imports: config.skip_imports,
+            skip_packages: config.skip_packages,
         })
     }
 
@@ -77,6 +89,9 @@ impl Matcher {
             cancel_flag: Arc::clone(cancel_flag),
             context_extractor,
             context_lines: self.context_lines,
+            skip_comments: self.skip_comments,
+            skip_imports: self.skip_imports,
+            skip_packages: self.skip_packages,
         };
 
         let mut searcher = Searcher::new();
@@ -106,6 +121,12 @@ struct MatchSink {
     cancel_flag: Arc<AtomicBool>,
     context_extractor: Option<ContextExtractor>,
     context_lines: usize,
+    /// v1.2.0:跳过注释行
+    skip_comments: bool,
+    /// v1.2.0:跳过 import 行
+    skip_imports: bool,
+    /// v1.2.0:跳过 package 行
+    skip_packages: bool,
 }
 
 impl Sink for MatchSink {
@@ -134,6 +155,17 @@ impl Sink for MatchSink {
         // SinkMatch 未暴露匹配范围,column 暂设为 0,后续通过 matcher.find() 优化
         let column = 0;
 
+        // v1.2.0:识别行类型
+        let line_kind = classify_line(&matched_text);
+
+        // v1.2.0:根据 skip 标志过滤(返回 Ok(true) 表示跳过当前行,继续搜索下一行)
+        match line_kind {
+            LineKind::Comment if self.skip_comments => return Ok(true),
+            LineKind::Import if self.skip_imports => return Ok(true),
+            LineKind::Package if self.skip_packages => return Ok(true),
+            _ => {}
+        }
+
         // 上下文行提取(如有配置)
         let (context_before, context_after) = if self.context_lines > 0 {
             if let Some(ref mut extractor) = self.context_extractor {
@@ -152,6 +184,7 @@ impl Sink for MatchSink {
             matched_text,
             context_before,
             context_after,
+            line_kind,
         });
 
         Ok(true)
