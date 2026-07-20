@@ -48,14 +48,17 @@
         <!-- 应用级 Service,管理 native 库加载与搜索会话 -->
         <applicationService
             serviceImplementation="com.example.rustsearch.service.RustSearchService"/>
+    </extensions>
 
-        <!-- 快捷键 Action -->
+    <!-- 快捷键 Action 必须放在独立的 <actions> 节点,
+         不能放在 <extensions> 内(否则 Action 不会注册,actionPerformed 不会被调用) -->
+    <!-- 默认快捷键 Shift+Alt+F(Mac/Windows/Linux 统一),用户可在 AS Keymap 中搜索 "RustSearch" 修改 -->
+    <actions>
         <action id="RustSearch.OpenSearch"
                 class="com.example.rustsearch.action.RustSearchAction"
                 text="%action.rustsearch.open.text"
                 description="%action.rustsearch.open.description">
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift alt F"/>
-            <keyboard-shortcut keymap="mac" first-keystroke="meta shift alt F"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="shift alt F"/>
         </action>
-    </extensions>
+    </actions>
 </idea-plugin>

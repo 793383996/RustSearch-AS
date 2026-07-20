@@ -4,7 +4,9 @@ import com.example.rustsearch.RustSearchBundle
 import com.example.rustsearch.RustSearchEngine.SearchResult
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.ui.UIUtil
 import java.awt.Component
 import javax.swing.Icon
@@ -12,7 +14,6 @@ import javax.swing.JLabel
 import javax.swing.JTree
 import javax.swing.SwingUtilities
 import javax.swing.tree.DefaultMutableTreeNode
-import javax.swing.tree.DefaultTreeCellRenderer
 import javax.swing.tree.DefaultTreeModel
 
 /**
@@ -50,6 +51,28 @@ class SearchResultTreeModel : DefaultTreeModel(DefaultMutableTreeNode("root")) {
 
     /** M2:是否已触发截断(触发后拒绝后续 batch,调用方应显示截断提示) */
     private var truncated = false
+
+    /**
+     * 需求 2:当前搜索词(用于 renderer 关键字高亮)
+     *
+     * 由 RustSearchPanel.performSearch 在搜索前设置,
+     * SearchResultTreeCellRenderer 通过 patternProvider 读取,
+     * 在代码行中高亮所有字面量匹配片段(STYLE_SEARCH_MATCH 黄色背景)。
+     * 正则搜索时不高亮(避免元字符误匹配)。
+     */
+    private var currentPattern: String = ""
+
+    /**
+     * 需求 2:设置当前搜索词(供 renderer 做关键字高亮)
+     *
+     * @param pattern 搜索词(字面量或正则源串);空字符串表示无高亮
+     */
+    fun setCurrentPattern(pattern: String) {
+        currentPattern = pattern
+    }
+
+    /** 需求 2:获取当前搜索词(供 renderer 使用) */
+    fun getCurrentPattern(): String = currentPattern
 
     /**
      * 追加一批搜索结果
@@ -250,34 +273,105 @@ data class MatchNodeData(
 /**
  * 搜索结果树单元格渲染器
  *
- * 自定义两类节点的视觉表现:
- * - 文件节点(FileNodeData): 文件图标 + 文件名 + 匹配数(灰色)
- * - 匹配节点(MatchNodeData): 行号(蓝色) + 匹配内容
+ * 需求 2:对齐 Android Studio Find in Files 视觉布局
+ * - 文件节点(FileNodeData): 文件图标 + 文件名(左) + 匹配数(右对齐,灰色)
+ * - 匹配节点(MatchNodeData): 行号(左,5位宽,灰色) + 代码行(中,关键字黄色高亮) + 文件名(右对齐,灰色)
+ *
+ * 基于 SimpleColoredComponent 的 Fragment 体系,支持一行多色多对齐,
+ * 替代原 DefaultTreeCellRenderer 的整行单色单文本。
+ *
+ * @param patternProvider 返回当前搜索词的回调(从 SearchResultTreeModel.getCurrentPattern() 读取),
+ *                        用于在匹配节点代码行中高亮关键字。正则模式时调用方应返回空字符串(不高亮)。
  */
-class SearchResultTreeCellRenderer : DefaultTreeCellRenderer() {
+class SearchResultTreeCellRenderer(
+    private val patternProvider: () -> String = { "" }
+) : ColoredTreeCellRenderer() {
 
-    override fun getTreeCellRendererComponent(
-        tree: JTree, value: Any, sel: Boolean, expanded: Boolean,
+    override fun customizeCellRenderer(
+        tree: JTree, value: Any, selected: Boolean, expanded: Boolean,
         leaf: Boolean, row: Int, hasFocus: Boolean
-    ): Component {
-        val comp = super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus)
-        when (val data = (value as? DefaultMutableTreeNode)?.userObject) {
-            is FileNodeData -> {
-                icon = AllIcons.FileTypes.Any_type
-                text = data.displayName()
-                foreground = if (sel) UIUtil.getTreeSelectionForeground(true)
-                             else UIUtil.getTreeForeground()
-            }
-            is MatchNodeData -> {
-                icon = null
-                text = RustSearchBundle.message("tree.match.node.display", data.lineNumber, data.matchedText)
-                foreground = if (sel) UIUtil.getTreeSelectionForeground(true)
-                             else JBColor(0x4A6F8E, 0x9BAFC4)
-            }
+    ) {
+        clear()
+        val node = value as? DefaultMutableTreeNode ?: return
+        when (val data = node.userObject) {
+            is FileNodeData -> renderFileNode(data)
+            is MatchNodeData -> renderMatchNode(data)
             else -> {
-                // 根节点或其他,使用默认渲染
+                // 根节点或其他,留空
             }
         }
-        return comp
+    }
+
+    /**
+     * 渲染文件节点:文件图标 + 文件名(左) + 匹配数(真右对齐,灰色)
+     *
+     * 注:selected 态由 ColoredTreeCellRenderer 父类(SimpleColoredComponent)
+     * 通过 JTree selectionBackground 自动渲染,文字颜色统一用 REGULAR_ATTRIBUTES。
+     */
+    private fun renderFileNode(data: FileNodeData) {
+        icon = AllIcons.FileTypes.Any_type
+        // 左:文件名
+        val sep = data.filePath.lastIndexOf('/')
+        val fileName = if (sep >= 0) data.filePath.substring(sep + 1) else data.filePath
+        append(fileName, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+        // 右:匹配数(真右对齐,灰色)
+        // 231 SDK: SimpleColoredComponent.append(text, attr, rightAligned:boolean)
+        append("(${data.matchCount})", SimpleTextAttributes.GRAYED_ATTRIBUTES, true)
+    }
+
+    /**
+     * 渲染匹配节点:行号(左,5位宽,灰色) + 代码行(中,关键字高亮)
+     *
+     * 需求 2(用户反馈):右侧文件名已移除,因为匹配节点已在对应文件节点下,
+     * 文件名重复显示冗余。仅保留行号 + 代码行 + 关键字高亮。
+     */
+    private fun renderMatchNode(data: MatchNodeData) {
+        // 左:行号(5 位宽度,灰色)
+        append(String.format("%5d: ", data.lineNumber), SimpleTextAttributes.GRAYED_ATTRIBUTES)
+
+        // 中:代码行(关键字高亮)
+        val pattern = patternProvider()
+        if (pattern.isNotEmpty()) {
+            appendWithHighlight(data.matchedText, pattern)
+        } else {
+            append(data.matchedText, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+        }
+    }
+
+    /**
+     * 关键字高亮:在 text 中查找 pattern 的所有出现(忽略大小写),
+     * 匹配区间用 STYLE_SEARCH_MATCH(黄色背景)高亮,非匹配区间用 REGULAR_ATTRIBUTES。
+     *
+     * 仅做字面量查找;正则模式由调用方传空 pattern 跳过高亮。
+     *
+     * 注:231 SDK 的 SimpleTextAttributes 4 参数构造函数签名为
+     * `(fgColor, bgColor, waveColor, style)`,无 5 参数版本,无 fontType 字段。
+     */
+    private fun appendWithHighlight(text: String, pattern: String) {
+        val baseAttr = SimpleTextAttributes.REGULAR_ATTRIBUTES
+        val matchAttr = SimpleTextAttributes(
+            baseAttr.fgColor,
+            JBColor.YELLOW,
+            baseAttr.waveColor,
+            baseAttr.style or SimpleTextAttributes.STYLE_SEARCH_MATCH
+        )
+
+        val lowerText = text.lowercase()
+        val lowerPattern = pattern.lowercase()
+        var start = 0
+        while (true) {
+            val idx = lowerText.indexOf(lowerPattern, start)
+            if (idx < 0) {
+                if (start < text.length) {
+                    append(text.substring(start), baseAttr)
+                }
+                break
+            }
+            if (idx > start) {
+                append(text.substring(start, idx), baseAttr)
+            }
+            append(text.substring(idx, idx + pattern.length), matchAttr)
+            start = idx + pattern.length
+        }
     }
 }

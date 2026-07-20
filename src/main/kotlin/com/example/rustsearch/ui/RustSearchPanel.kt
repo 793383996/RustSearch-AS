@@ -4,6 +4,7 @@ import com.example.rustsearch.RustSearchEngine.SearchResult
 import com.example.rustsearch.SearchConfig
 import com.example.rustsearch.RustSearchBundle
 import com.example.rustsearch.service.RustSearchService
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
@@ -27,6 +28,8 @@ import java.awt.event.MouseEvent
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
+import javax.swing.Icon
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JPanel
 import javax.swing.JRadioButton
@@ -98,20 +101,29 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         toolTipText = RustSearchBundle.message("search.field.tooltip")
     }
 
-    /** 正则模式开关 */
-    private val regexCheckBox = JBCheckBox(RustSearchBundle.message("search.regex.text")).apply {
-        toolTipText = RustSearchBundle.message("search.regex.tooltip")
-    }
+    /** 正则模式开关(图标 toggle,对齐 Find in Path 风格) */
+    private val regexButton = IconToggleButton(
+        AllIcons.Actions.Regex,
+        AllIcons.Actions.RegexHovered,
+        AllIcons.Actions.RegexSelected,
+        RustSearchBundle.message("search.regex.tooltip")
+    )
 
-    /** 大小写敏感开关 */
-    private val caseSensitiveCheckBox = JBCheckBox(RustSearchBundle.message("search.case.sensitive.text")).apply {
-        toolTipText = RustSearchBundle.message("search.case.sensitive.tooltip")
-    }
+    /** 大小写敏感开关(图标 toggle) */
+    private val caseSensitiveButton = IconToggleButton(
+        AllIcons.Actions.MatchCase,
+        AllIcons.Actions.MatchCaseHovered,
+        AllIcons.Actions.MatchCaseSelected,
+        RustSearchBundle.message("search.case.sensitive.tooltip")
+    )
 
-    /** 全字匹配开关 */
-    private val wholeWordsCheckBox = JBCheckBox(RustSearchBundle.message("search.whole.words.text")).apply {
-        toolTipText = RustSearchBundle.message("search.whole.words.tooltip")
-    }
+    /** 全字匹配开关(图标 toggle) */
+    private val wholeWordsButton = IconToggleButton(
+        AllIcons.Actions.Words,
+        AllIcons.Actions.WordsHovered,
+        AllIcons.Actions.WordsSelected,
+        RustSearchBundle.message("search.whole.words.tooltip")
+    )
 
     // ==================== 作用域(单选:项目 / 模块) ====================
 
@@ -155,7 +167,8 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         isRootVisible = false
         showsRootHandles = true
         selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
-        setCellRenderer(SearchResultTreeCellRenderer())
+        // 需求 2:传 patternProvider 让 renderer 读取 currentPattern 做关键字高亮
+        setCellRenderer(SearchResultTreeCellRenderer(patternProvider = { treeModel.getCurrentPattern() }))
     }
 
     /** 状态栏 */
@@ -182,9 +195,11 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         val row1 = Box.createHorizontalBox().apply {
             add(searchField)
             add(Box.createHorizontalStrut(4))
-            add(regexCheckBox)
-            add(caseSensitiveCheckBox)
-            add(wholeWordsCheckBox)
+            add(regexButton)
+            add(Box.createHorizontalStrut(3))
+            add(caseSensitiveButton)
+            add(Box.createHorizontalStrut(3))
+            add(wholeWordsButton)
         }
 
         // 第二行:作用域单选(项目/模块) + 模块下拉框
@@ -256,9 +271,9 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         val autoSearchListener = java.awt.event.ActionListener {
             if (!isRefreshingModules) performSearch()
         }
-        regexCheckBox.addActionListener(autoSearchListener)
-        caseSensitiveCheckBox.addActionListener(autoSearchListener)
-        wholeWordsCheckBox.addActionListener(autoSearchListener)
+        regexButton.addActionListener(autoSearchListener)
+        caseSensitiveButton.addActionListener(autoSearchListener)
+        wholeWordsButton.addActionListener(autoSearchListener)
         extensionCheckBoxes.forEach { it.addActionListener(autoSearchListener) }
 
         // 作用域切换:启用/禁用模块下拉框并自动搜索
@@ -317,6 +332,23 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
     }
 
     /**
+     * 预填搜索框并可选自动触发搜索
+     *
+     * 需求 1:供 RustSearchAction 在用户选中文本后调用,
+     * 把选中文本填入搜索框并立即触发搜索,实现"选中+快捷键=自动搜索"。
+     *
+     * @param text 待预填的文本(选中文本);空字符串仅聚焦搜索框
+     * @param autoTrigger 是否自动触发搜索(选中文字场景为 true)
+     */
+    fun setInitialSearchText(text: String, autoTrigger: Boolean) {
+        searchField.text = text
+        searchField.requestFocusInWindow()
+        if (autoTrigger && text.isNotBlank()) {
+            performSearch()
+        }
+    }
+
+    /**
      * 执行搜索
      *
      * 当 pattern 为空时静默返回(自动搜索场景下用户可能尚未输入内容)。
@@ -360,9 +392,9 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         val config = SearchConfig(
             roots = roots,
             pattern = pattern,
-            isRegex = regexCheckBox.isSelected,
-            caseSensitive = caseSensitiveCheckBox.isSelected,
-            wholeWords = wholeWordsCheckBox.isSelected,
+            isRegex = regexButton.isSelected,
+            caseSensitive = caseSensitiveButton.isSelected,
+            wholeWords = wholeWordsButton.isSelected,
             includeGlobs = includeGlobs,
             excludeGlobs = emptyList(),
             contextLines = 2
@@ -370,6 +402,9 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
 
         // 清空旧结果
         treeModel.clear()
+        // 需求 2:设置当前搜索词供 renderer 做关键字高亮
+        // 正则模式传空字符串跳过高亮(避免元字符误匹配);字面量模式传原始 pattern
+        treeModel.setCurrentPattern(if (regexButton.isSelected) "" else pattern)
         statusLabel.text = RustSearchBundle.message("search.status.searching")
 
         val startTime = System.currentTimeMillis()
@@ -526,4 +561,63 @@ class RustSearchPanel(private val project: Project) : JPanel(BorderLayout()), Di
         // 旧搜索的 releaseSearch 不会误删新搜索的 session,实际风险极低。
         logger.info("RustSearchPanel disposed")
     }
+
+    /**
+     * 图标式 toggle 按钮,对齐 Find in Path 风格
+     *
+     * 选中时显示 Selected 图标(高亮),未选中显示 normalIcon,悬停显示 hoveredIcon。
+     * 基于 JToggleButton(原生支持 selected 态),避免 JButton + ButtonModel.isSelected 的状态丢失问题。
+     *
+     * 用于正则 / 大小写 / 全字 三个开关,对齐 Android Studio Find in Path 的 `.*` `Aa` `|W|` 风格。
+     *
+     * 选中态视觉强化:
+     * - 选中时显示 selectedIcon(AllIcons.Actions.RegexSelected 等,带蓝色高亮)
+     * - 选中时背景填充浅色(与 Find in Path 一致),未选中透明
+     */
+    private class IconToggleButton(
+        private val normalIcon: Icon,
+        private val hoveredIcon: Icon,
+        private val selectedIcon: Icon,
+        tooltip: String
+    ) : javax.swing.JToggleButton() {
+        init {
+            icon = normalIcon
+            // 透明背景 + 无边框,选中态通过图标和手动绘制背景区分
+            isContentAreaFilled = false
+            isBorderPainted = false
+            isFocusPainted = false
+            isFocusable = false
+            toolTipText = tooltip
+            // 收紧尺寸:对齐 Find in Path 图标按钮(约 24x24)
+            margin = java.awt.Insets(0, 0, 0, 0)
+            preferredSize = java.awt.Dimension(24, 24)
+            maximumSize = java.awt.Dimension(24, 24)
+            minimumSize = java.awt.Dimension(24, 24)
+            // 根据选中/悬停/普通三态切换图标
+            model.addChangeListener {
+                icon = when {
+                    isSelected -> selectedIcon
+                    model.isRollover -> hoveredIcon
+                    else -> normalIcon
+                }
+                // 选中态切换后重绘,确保背景填充立即生效
+                repaint()
+            }
+        }
+
+        /** 选中态绘制浅色背景(与 Find in Path 一致) */
+        override fun paintComponent(g: java.awt.Graphics) {
+            if (isSelected) {
+                val color = JBUI.CurrentTheme.ActionButton.hoverBackground()
+                g.color = color
+                g.fillRect(0, 0, width, height)
+            }
+            super.paintComponent(g)
+        }
+    }
+
+    /**
+     * JToggleButton 原生 isSelected() 由 ButtonModel.selected 支撑,
+     * 点击自动切换,无需扩展属性;regexButton.isSelected 直接用父类 AbstractButton.isSelected。
+     */
 }
