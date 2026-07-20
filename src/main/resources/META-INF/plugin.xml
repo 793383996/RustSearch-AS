@@ -16,6 +16,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>1.1.0</b><br/>
+        <ul>
+            <li>体验优化:快捷键统一为 Shift+Alt+F(Mac/Windows/Linux 通用),可在 Keymap 中配置</li>
+            <li>体验优化:编辑器选中文字 → 快捷键自动预填搜索框并触发搜索</li>
+            <li>排版优化:结果树对齐 Find in Files 风格,行号 + 代码行 + 关键字黄色高亮</li>
+            <li>排版优化:三个开关(正则/大小写/全字)改为图标按钮,选中态视觉强化</li>
+            <li>修复:Action 未注册到 Action 系统(&lt;action&gt; 误放在 &lt;extensions&gt; 内)导致快捷键失效</li>
+            <li>修复:231 SDK 中 ToolWindow 不继承 UserDataHolder 的兼容性问题</li>
+        </ul>
         <b>1.0.0</b><br/>
         <ul>
             <li>性能修复:panic=unwind 改 catch_unwind 保护 JNI、with_local_frame 防 local ref 泄漏、par_bridge 流式搜索、mmap 上下文提取</li>
