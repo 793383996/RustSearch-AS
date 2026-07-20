@@ -29,6 +29,9 @@ object RustSearchEngine {
      *
      * 搜索在 Rust 后台线程执行,通过 [pollResults] 轮询获取结果。
      *
+     * v1.2.0:新增 `skipComments`/`skipImports`/`skipPackages` 三个开关,
+     * 由 Rust 侧 `MatchSink::matched` 在匹配阶段过滤对应行类型。
+     *
      * @param roots 搜索根目录数组
      * @param pattern 搜索模式(字面量或正则)
      * @param isRegex 是否为正则模式
@@ -37,6 +40,9 @@ object RustSearchEngine {
      * @param includeGlobs 包含文件通配符(如 "*.kt")
      * @param excludeGlobs 排除文件通配符
      * @param contextLines 上下文行数
+     * @param skipComments 是否忽略注释行,默认 false
+     * @param skipImports 是否忽略 import 行,默认 false
+     * @param skipPackages 是否忽略 package 行,默认 false
      * @return searchId > 0 表示成功,0 表示失败(异常已抛出)
      */
     @JvmStatic
@@ -48,7 +54,10 @@ object RustSearchEngine {
         wholeWords: Boolean,
         includeGlobs: Array<String>,
         excludeGlobs: Array<String>,
-        contextLines: Int
+        contextLines: Int,
+        skipComments: Boolean,
+        skipImports: Boolean,
+        skipPackages: Boolean
     ): Long
 
     /**
@@ -98,10 +107,20 @@ object RustSearchEngine {
     /**
      * 单条搜索匹配结果
      *
-     * **注意**:此类必须作为 [RustSearchEngine] 的内部类,且构造函数参数顺序与类型
-     * 必须与 Rust 侧 `result.rs` 中的 `build_single_result` 严格一致:
-     * `(Ljava/lang/String;IILjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V`
-     * 即 (String, int, int, String, String[], String[])
+     * **关键约束**:构造函数参数顺序与类型必须与 Rust 侧 `result.rs` 中的
+     * `build_single_result_in_frame` 严格一致,JVM 签名为:
+     * `(Ljava/lang/String;IILjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;I)V`
+     * 即 (String, int, int, String, String[], String[], int)
+     *
+     * **v1.2.0 修复**:行类型以 **Int 序数** 传递([lineKindOrdinal]),不是 [LineKind] 枚举对象。
+     * 原因:Rust 侧 `JValue::Int(line_kind_ordinal)` 调用 `new_object` 时,
+     * Kotlin data class 若声明 `lineKind: LineKind` 字段,编译后的构造函数签名是
+     * `...(String, int, int, String, String[], String[], LineKind)` 而非
+     * `...(String, int, int, String, String[], String[], int)`,JNI 找不到匹配构造函数,
+     * 抛 `NoSuchMethodError: <init>`,导致搜索卡死在"搜索中"。
+     *
+     * UI 层通过 derived property [lineKind] 获取枚举值(由 [LineKind.fromOrdinal] 转换),
+     * 不影响业务代码可读性。
      *
      * @param filePath 匹配文件绝对路径
      * @param lineNumber 行号(从 1 开始)
@@ -109,6 +128,8 @@ object RustSearchEngine {
      * @param matchedText 匹配的文本内容
      * @param contextBefore 上下文前导行(按行分割)
      * @param contextAfter 上下文后续行(按行分割)
+     * @param lineKindOrdinal 行类型序数(0=Code, 1=Comment, 2=Import, 3=Package),
+     *        由 Rust 侧 `classify_line` 识别,JNI 边界传递
      */
     data class SearchResult(
         val filePath: String,
@@ -116,9 +137,20 @@ object RustSearchEngine {
         val column: Int,
         val matchedText: String,
         val contextBefore: Array<String>,
-        val contextAfter: Array<String>
+        val contextAfter: Array<String>,
+        val lineKindOrdinal: Int = 0
     ) {
+        /**
+         * 行类型枚举(derived property,由 [lineKindOrdinal] 转换)
+         *
+         * 不带 backing field,不参与 data class 自动生成的 equals/hashCode/toString,
+         * 也不进入构造函数签名,保证 JNI 签名严格匹配 Rust 侧 Int 传递。
+         */
+        val lineKind: LineKind
+            get() = LineKind.fromOrdinal(lineKindOrdinal)
+
         // data class 中 Array 字段不会自动生成 equals/hashCode,需手动实现
+        // 注意:lineKind 是 derived property,不参与 equals/hashCode(基于 ordinal 即可)
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is SearchResult) return false
@@ -127,7 +159,8 @@ object RustSearchEngine {
                     column == other.column &&
                     matchedText == other.matchedText &&
                     contextBefore.contentEquals(other.contextBefore) &&
-                    contextAfter.contentEquals(other.contextAfter)
+                    contextAfter.contentEquals(other.contextAfter) &&
+                    lineKindOrdinal == other.lineKindOrdinal
         }
 
         override fun hashCode(): Int {
@@ -137,11 +170,52 @@ object RustSearchEngine {
             result = 31 * result + matchedText.hashCode()
             result = 31 * result + contextBefore.contentHashCode()
             result = 31 * result + contextAfter.contentHashCode()
+            result = 31 * result + lineKindOrdinal
             return result
         }
 
         override fun toString(): String {
-            return "SearchResult(filePath='$filePath', line=$lineNumber, col=$column, matched='$matchedText')"
+            return "SearchResult(filePath='$filePath', line=$lineNumber, col=$column, matched='$matchedText', lineKind=$lineKind)"
+        }
+    }
+}
+
+/**
+ * 行类型枚举(v1.2.0 新增)
+ *
+ * 与 Rust 侧 `crate::search::line_kind::LineKind` 严格对齐,
+ * 通过 Int 序数在 JNI 边界传递(避免复杂对象转换)。
+ *
+ * 序数值固定不变,前后版本必须保持一致:
+ * - 0 = CODE 普通代码行
+ * - 1 = COMMENT 注释行(`//`、`#`、`&#47;*`、`*`、`&lt;!--`、`--`)
+ * - 2 = IMPORT 导入行(`import`、`#include`、`using`、`require` 等)
+ * - 3 = PACKAGE 包声明行(`package xxx`)
+ *
+ * UI 层根据此枚举对搜索结果着色:
+ * - COMMENT → 淡蓝色
+ * - IMPORT / PACKAGE → 灰色
+ * - CODE → 默认色
+ */
+enum class LineKind(val ordinalValue: Int) {
+    CODE(0),
+    COMMENT(1),
+    IMPORT(2),
+    PACKAGE(3);
+
+    companion object {
+        /**
+         * 从 Int 序数转换为 [LineKind](JNI 边界使用)
+         *
+         * @param v Rust 侧传入的序数值
+         * @return 对应枚举值,未知值降级为 [CODE](保证向后兼容)
+         */
+        fun fromOrdinal(v: Int): LineKind = when (v) {
+            0 -> CODE
+            1 -> COMMENT
+            2 -> IMPORT
+            3 -> PACKAGE
+            else -> CODE
         }
     }
 }

@@ -6,6 +6,9 @@ package com.example.rustsearch
  * 封装用户在 UI 中输入的搜索参数,通过 [RustSearchService] 转换为 JNI 调用参数。
  * 字段与 Rust 侧 `SearchConfig` 一一对应,但此处用可空类型与默认值简化 UI 层使用。
  *
+ * v1.2.0:新增 `skipComments`/`skipImports`/`skipPackages` 三个开关,
+ * 由 Rust 侧 `MatchSink::matched` 在匹配阶段过滤对应行类型。
+ *
  * @param roots 搜索根目录列表
  * @param pattern 搜索模式(字面量或正则)
  * @param isRegex 是否为正则模式,默认 false
@@ -14,6 +17,9 @@ package com.example.rustsearch
  * @param includeGlobs 包含文件通配符(如 "*.kt"),空列表表示不过滤
  * @param excludeGlobs 排除文件通配符,空列表表示不排除
  * @param contextLines 上下文行数,默认 0(不提取上下文)
+ * @param skipComments 是否忽略注释行(//、#、&#47;*、*、&lt;!--、--),默认 false
+ * @param skipImports 是否忽略 import/package 行(import、#include、using、require 等),默认 false
+ * @param skipPackages 是否忽略 package 声明行,默认 false
  */
 data class SearchConfig(
     val roots: List<String>,
@@ -23,7 +29,10 @@ data class SearchConfig(
     val wholeWords: Boolean = false,
     val includeGlobs: List<String> = emptyList(),
     val excludeGlobs: List<String> = emptyList(),
-    val contextLines: Int = 0
+    val contextLines: Int = 0,
+    val skipComments: Boolean = false,
+    val skipImports: Boolean = false,
+    val skipPackages: Boolean = false
 ) {
     /**
      * 转换为 JNI 调用所需的数组参数
@@ -38,7 +47,10 @@ data class SearchConfig(
         wholeWords = wholeWords,
         includeGlobs = includeGlobs.toTypedArray(),
         excludeGlobs = excludeGlobs.toTypedArray(),
-        contextLines = contextLines
+        contextLines = contextLines,
+        skipComments = skipComments,
+        skipImports = skipImports,
+        skipPackages = skipPackages
     )
 }
 
@@ -55,5 +67,8 @@ data class JniSearchArgs(
     val wholeWords: Boolean,
     val includeGlobs: Array<String>,
     val excludeGlobs: Array<String>,
-    val contextLines: Int
+    val contextLines: Int,
+    val skipComments: Boolean,
+    val skipImports: Boolean,
+    val skipPackages: Boolean
 )

@@ -131,7 +131,8 @@ class RustSearchService : Disposable {
         val args = config.toJniArgs()
         val searchId = RustSearchEngine.startSearch(
             args.roots, args.pattern, args.isRegex, args.caseSensitive, args.wholeWords,
-            args.includeGlobs, args.excludeGlobs, args.contextLines
+            args.includeGlobs, args.excludeGlobs, args.contextLines,
+            args.skipComments, args.skipImports, args.skipPackages
         )
 
         if (searchId == 0L) {
